@@ -1439,9 +1439,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb57a3fbdf2bdc51bd024050719c65929d0545f4cca225000f99678f62935f02"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
 dependencies = [
  "blake3",
  "cc",
@@ -1455,7 +1454,7 @@ dependencies = [
  "miden-crypto-derive",
  "miden-field",
  "miden-lifted-stark",
- "miden-serde-utils",
+ "miden-serde-utils 0.28.0",
  "num",
  "num-complex",
  "once_cell",
@@ -1481,9 +1480,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ee301b99abeeb640f9f5eaa7c11f731bab5b2e7671cbaebed606da5ff1a4a2b"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -1510,11 +1508,10 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06741437192077e3fec0a0685ef05ea883aa3823bc0722ae56b178233db2812f"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
 dependencies = [
- "miden-serde-utils",
+ "miden-serde-utils 0.28.0",
  "num-bigint",
  "p3-challenger",
  "p3-field",
@@ -1553,9 +1550,8 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-air"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abf4dca41a33d65992ad877746539b48fbc367101d2ed3161d3b727140af3aaf"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
 dependencies = [
  "p3-air",
  "p3-challenger",
@@ -1567,9 +1563,8 @@ dependencies = [
 
 [[package]]
 name = "miden-lifted-stark"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7087fe7fa147cd443848844afdf54ffa8be697bd8d7b8304662fd6b252a01aa2"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
 dependencies = [
  "miden-lifted-air",
  "miden-stark-transcript",
@@ -1596,6 +1591,7 @@ dependencies = [
  "miden-assembly-syntax",
  "miden-core",
  "miden-debug-types",
+ "miden-serde-utils 0.27.0",
  "miden-test-serde-macros",
  "proptest",
  "proptest-derive",
@@ -1778,10 +1774,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-serde-utils"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
+dependencies = [
+ "p3-field",
+ "p3-goldilocks",
+]
+
+[[package]]
 name = "miden-stark-transcript"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ca940751e1ca7abc33a9b8eaaad4cdd6f153613380ad2c3626134bab6aafb91"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -1791,9 +1795,8 @@ dependencies = [
 
 [[package]]
 name = "miden-stateful-hasher"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcc3510d500d4ce676652ef24539e2be4f04ae63d0bf8299799ca16d79b66a9d"
+version = "0.28.0"
+source = "git+https://github.com/0xMiden/crypto?rev=35d06afbc0d935b45add43695b07544a2d41335f#35d06afbc0d935b45add43695b07544a2d41335f"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -1952,7 +1955,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff8e411205251d07ec902559d80f097e66fedb644e0c35dc4cad431c10b99a4d"
 dependencies = [
  "miden-formatting",
- "miden-serde-utils",
+ "miden-serde-utils 0.27.0",
  "serde",
  "serde_repr",
  "smallvec",

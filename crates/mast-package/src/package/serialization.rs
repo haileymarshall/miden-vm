@@ -59,6 +59,7 @@ use miden_core::{
         SliceReader,
     },
 };
+use miden_serde_utils_v027 as serde027;
 
 use super::{
     ConstantExport, PackageId, PackageModule, PackageSubmodule, ProcedureExport, TargetType,
@@ -85,6 +86,99 @@ const VERSION: [u8; 3] = [6, 0, 0];
 /// The budget is intentionally finite to reject malicious length prefixes, but larger than the
 /// source length because collection deserialization uses conservative per-element size estimates.
 const PACKAGE_BYTE_READ_BUDGET_MULTIPLIER: usize = 64;
+
+// MIDENC HIR TYPE SERIALIZATION COMPATIBILITY
+// ================================================================================================
+
+fn write_midenc_hir<T, W>(value: &T, target: &mut W)
+where
+    T: serde027::Serializable,
+    W: ByteWriter,
+{
+    let mut writer = Serde027Writer { target };
+    value.write_into(&mut writer);
+}
+
+fn read_midenc_hir<T, R>(source: &mut R) -> Result<T, DeserializationError>
+where
+    T: serde027::Deserializable,
+    R: ByteReader,
+{
+    let mut reader = Serde027Reader { source };
+    T::read_from(&mut reader).map_err(map_deserialization_error_027)
+}
+
+struct Serde027Writer<'a, W: ByteWriter> {
+    target: &'a mut W,
+}
+
+impl<W: ByteWriter> serde027::ByteWriter for Serde027Writer<'_, W> {
+    fn write_u8(&mut self, value: u8) {
+        self.target.write_u8(value);
+    }
+
+    fn write_bytes(&mut self, values: &[u8]) {
+        self.target.write_bytes(values);
+    }
+}
+
+struct Serde027Reader<'a, R: ByteReader> {
+    source: &'a mut R,
+}
+
+impl<R: ByteReader> serde027::ByteReader for Serde027Reader<'_, R> {
+    fn read_u8(&mut self) -> Result<u8, serde027::DeserializationError> {
+        self.source.read_u8().map_err(map_deserialization_error_028)
+    }
+
+    fn peek_u8(&self) -> Result<u8, serde027::DeserializationError> {
+        self.source.peek_u8().map_err(map_deserialization_error_028)
+    }
+
+    fn read_slice(&mut self, len: usize) -> Result<&[u8], serde027::DeserializationError> {
+        self.source.read_slice(len).map_err(map_deserialization_error_028)
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N], serde027::DeserializationError> {
+        self.source.read_array().map_err(map_deserialization_error_028)
+    }
+
+    fn check_eor(&self, num_bytes: usize) -> Result<(), serde027::DeserializationError> {
+        self.source.check_eor(num_bytes).map_err(map_deserialization_error_028)
+    }
+
+    fn has_more_bytes(&self) -> bool {
+        self.source.has_more_bytes()
+    }
+
+    fn max_alloc(&self, element_size: usize) -> usize {
+        self.source.max_alloc(element_size)
+    }
+}
+
+fn map_deserialization_error_027(error: serde027::DeserializationError) -> DeserializationError {
+    match error {
+        serde027::DeserializationError::UnexpectedEOF => DeserializationError::UnexpectedEOF,
+        serde027::DeserializationError::InvalidValue(message) => {
+            DeserializationError::InvalidValue(message)
+        },
+        serde027::DeserializationError::UnknownError(message) => {
+            DeserializationError::UnknownError(message)
+        },
+    }
+}
+
+fn map_deserialization_error_028(error: DeserializationError) -> serde027::DeserializationError {
+    match error {
+        DeserializationError::UnexpectedEOF => serde027::DeserializationError::UnexpectedEOF,
+        DeserializationError::InvalidValue(message) => {
+            serde027::DeserializationError::InvalidValue(message)
+        },
+        DeserializationError::UnknownError(message) => {
+            serde027::DeserializationError::UnknownError(message)
+        },
+    }
+}
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -693,7 +787,7 @@ impl Serializable for ProcedureExport {
         match self.signature.as_ref() {
             Some(sig) => {
                 target.write_bool(true);
-                sig.write_into(target);
+                write_midenc_hir(sig, target);
             },
             None => {
                 target.write_bool(false);
@@ -736,7 +830,7 @@ impl ProcedureExport {
             ));
         }
         let signature = if source.read_bool()? {
-            Some(FunctionType::read_from(source)?)
+            Some(read_midenc_hir::<FunctionType, _>(source)?)
         } else {
             None
         };
@@ -768,7 +862,7 @@ impl Deserializable for ProcedureExport {
         };
         let digest = Word::read_from(source)?;
         let signature = if source.read_bool()? {
-            Some(FunctionType::read_from(source)?)
+            Some(read_midenc_hir::<FunctionType, _>(source)?)
         } else {
             None
         };
@@ -802,7 +896,7 @@ impl Deserializable for ConstantExport {
 impl Serializable for TypeExport {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.path.write_into(target);
-        self.ty.write_into(target);
+        write_midenc_hir(&self.ty, target);
     }
 }
 
@@ -810,7 +904,7 @@ impl Deserializable for TypeExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         use miden_assembly_syntax::ast::types::Type;
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
-        let ty = Type::read_from(source)?;
+        let ty = read_midenc_hir::<Type, _>(source)?;
         Ok(Self { path, ty })
     }
 }
