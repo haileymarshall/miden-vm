@@ -1,10 +1,9 @@
 # Precompiles
 
-Precompiles let Miden programs defer expensive computations to host-side implementations while
-still binding the claimed result into the VM proof. The current proof-bound model is the
-content-addressed deferred DAG described in [Deferred computation](../deferred/index.md): programs
-register deferred nodes, log statement digests that evaluate to `TRUE`, proofs carry
-`DeferredStateWire`, and verifiers rehydrate that wire under a supplied `PrecompileRegistry`.
+Precompiles let Miden programs make claims about expensive computations without executing them
+directly in the VM trace. This page covers the VM-side mechanics: wrappers register deferred nodes,
+bind their digests to circuit-visible data, and log statement digests that evaluate to `TRUE`. For
+proof shapes, see [Deferred computation](../deferred/index.md).
 
 Concrete proof-bound implementations live in the `miden-precompiles` crate. Their MASM support
 modules are currently internal implementation detail used by core-library facades and tests.
@@ -18,7 +17,7 @@ modules are currently internal implementation detail used by core-library facade
 | `Precompile` | A host implementation that owns one precompile id, decodes the structural shape for its tags, evaluates nodes to canonical form, and optionally contributes canonical constants through `init()`. |
 | `PrecompileRegistry` | The verifier/host dispatcher for trusted precompile implementations. Verification must use the registry that corresponds to the proof-bound precompile set being accepted. |
 | `DeferredState` | The host-side DAG witness accumulated during execution. It tracks registered nodes, evaluates them under the registry, and maintains the rolling deferred root. |
-| `DeferredStateWire` | The canonical proof-carried wire format for the root-reachable deferred DAG. It is passive data until rehydrated and validated with `DeferredState::from_wire`. |
+| `DeferredStateWire` | The canonical wire format for partial proofs. It is passive data until rehydrated and validated with `DeferredState::from_wire`. |
 | Deferred root | A single digest public value. Each logged statement appends `Node::AND(previous_root, statement_digest)` and advances the root to that node digest. |
 
 ## Lifecycle overview
@@ -37,11 +36,10 @@ modules are currently internal implementation detail used by core-library facade
    `STMNT` must already be registered in `DeferredState` and evaluate to `TRUE`. The constrained
    Poseidon2 permutation computes `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, Tag::AND]))`, and
    host-side deferred state records the corresponding `AND` node.
-5. **Prover serializes the wire** – The prover serializes `trace.deferred_state().to_wire()` into
-   `ExecutionProof` and uses the final deferred root as the STARK public input.
-6. **Verifier rehydrates and checks** – The verifier decodes `DeferredStateWire` with the caller's
-   `PrecompileRegistry`, rejects non-canonical or semantically false wires, compares the rehydrated
-   root to the public deferred root, and then verifies the STARK proof.
+5. **Prover binds the deferred root** – The VM STARK uses the final deferred root as a public input.
+   `ExecutionProof` carries either final or partial `DeferredProof` material for that root.
+6. **Verifier resolves and checks** – The verifier resolves a trusted root from `DeferredProof`, then
+   checks the VM STARK using that root.
 
 ## Responsibilities
 
@@ -50,8 +48,8 @@ modules are currently internal implementation detail used by core-library facade
 | VM | Executes deferred advice events and `log_deferred`, maintains the rolling deferred root, and exposes the final root as a public value. |
 | Host / advice provider | Maintains `DeferredState`, runs trusted precompile implementations, and supplies evaluation advice when wrappers request it. |
 | MASM wrapper | Registers concrete deferred nodes, computes node/statement digests from circuit-visible data, logs only registered statements that should evaluate to `TRUE`, and hides helper outputs from callers when appropriate. |
-| Prover | Includes the canonical `DeferredStateWire` in `ExecutionProof`. |
-| Verifier | Rehydrates `DeferredStateWire` under a supplied `PrecompileRegistry`, checks the final deferred root, and verifies the STARK proof. |
+| Prover | Uses the final deferred root as a VM STARK public input and includes the chosen `DeferredProof` form in `ExecutionProof`. |
+| Verifier | Resolves a trusted deferred root from `DeferredProof`, then verifies the VM STARK using that root. |
 
 ## Conventions
 
@@ -83,8 +81,8 @@ modules are currently internal implementation detail used by core-library facade
 
 ## Related reading
 
-- [Deferred computation](../deferred/index.md) – deferred DAG model, `DeferredStateWire`, and verification.
+- [Deferred computation](../deferred/index.md) – deferred DAG model and final/partial proof shapes.
 - [`log_deferred` instruction](../../user_docs/assembly/instruction_reference.md) – stack behaviour
   and opcode semantics.
-- `DeferredStateWire` implementation (`core/src/deferred/wire.rs`) – proof-carried deferred witness
+- `DeferredStateWire` implementation (`core/src/deferred/wire.rs`) – partial-proof deferred witness
   details.

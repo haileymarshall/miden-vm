@@ -388,8 +388,8 @@ The `log_deferred` operation folds a verified statement digest `STMNT` into the 
 root. The update is the structural digest of `Node::and(ROOT_PREV, STMNT)`, computed as a Poseidon2
 merge with the framework `Tag::AND` capacity word `[1, 0, 0, 0]`:
 `ROOT_NEW = rate0(Poseidon2([ROOT_PREV, STMNT, [1,0,0,0]]))`. The final root is a public input;
-proofs carry `DeferredStateWire`, and verifiers rehydrate that wire under the supplied
-`PrecompileRegistry`. This section concentrates on the stack interaction and bus messages.
+`DeferredProof` material later justifies that root before VM STARK verification. This section
+concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
@@ -523,6 +523,6 @@ v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_deferred} + \sum_{j=0}^{3} \al
 $$
 
 Because the domain-separated Poseidon2 merge outputs a digest word directly, the deferred root is
-itself the digest at every step. The proof carries the root-reachable DAG as `DeferredStateWire`; the
-final deferred root is a fixed four-field-element public value, not a variable-length request
-transcript.
+itself the digest at every step. The final deferred root is a fixed four-field-element public value,
+not a variable-length request transcript. Partial proofs may carry the root-reachable DAG as
+`DeferredStateWire`; final proofs may instead carry a precompile VM STARK proof for the same root.
