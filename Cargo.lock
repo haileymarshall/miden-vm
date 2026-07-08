@@ -2417,7 +2417,6 @@ dependencies = [
 name = "miden-precompiles-prover"
 version = "0.25.0"
 dependencies = [
- "itertools 0.14.0",
  "k256 0.13.4",
  "miden-air",
  "miden-core",
@@ -2425,10 +2424,7 @@ dependencies = [
  "miden-lifted-air",
  "miden-lifted-stark",
  "miden-precompiles",
- "p3-air",
- "p3-field",
- "p3-matrix",
- "rand 0.9.4",
+ "rand 0.10.1",
  "ruint",
  "serde",
  "serde-wincode",
