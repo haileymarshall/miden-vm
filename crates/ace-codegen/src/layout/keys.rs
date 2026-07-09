@@ -14,6 +14,8 @@ pub enum InputKey {
     /// The verifier assigns β to the AIR at proof_order position 0 and 1 to the other.
     /// Only present in layouts built with `num_airs >= 2`.
     MultiAirBeta(usize),
+    /// Preprocessed trace value at (offset, index).
+    Preprocessed { offset: usize, index: usize },
     /// Main trace value at (offset, index).
     Main { offset: usize, index: usize },
     /// Base-field coordinate for an aux trace column.
@@ -78,6 +80,11 @@ impl InputKeyMapper<'_> {
             InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
             InputKey::MultiAirBeta(air) => {
                 layout.stark.multi_air.as_ref().and_then(|m| m.beta(air))
+            },
+            InputKey::Preprocessed { offset, index } => match offset {
+                0 => layout.regions.preprocessed_curr.index(index),
+                1 => layout.regions.preprocessed_next.index(index),
+                _ => None,
             },
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),

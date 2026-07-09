@@ -1,16 +1,9 @@
-//! ACE circuit integration for the multi-AIR proof.
+//! ACE circuit integration for the precompile chiplet multi-AIR proof.
 //!
-//! The circuit checks the β-folded constraint composition of the AIRs. The
-//! LogUp auxiliary-trace boundary identity
-//!
-//! ```text
-//! 0  =  Σ aux_bound[0..NUM_LOGUP_COMMITTED_FINALS]
-//!         + c_block_hash
-//!         + c_log_deferred
-//!         + c_kernel_rom
-//! ```
-//!
-//! is checked outside the circuit, against the absorbed per-AIR LogUp finals.
+//! The circuit checks the β-folded constraint composition of every chiplet AIR in
+//! [`ChipletAir::all`]. The cross-chiplet LogUp identity enforced by
+//! `ChipletMultiAir::eval_external` is not folded into this circuit; it remains an external
+//! multi-AIR assertion.
 
 use alloc::vec::Vec;
 
@@ -18,106 +11,100 @@ use miden_ace_codegen::{
     AceCircuit, AceConfig, AceDag, AceError, DagBuilder, InputKey, NodeId, NodeKind,
     build_ace_dag_for_air,
 };
-use miden_core::{Felt, field::ExtensionField};
-use miden_crypto::{
-    field::Algebra,
-    stark::air::{BaseAir, LiftedAir, symbolic::SymbolicExpressionExt},
+use miden_core::{
+    Felt,
+    field::{ExtensionField, QuadFelt},
 };
+use miden_crypto::stark::air::{BaseAir, LiftedAir};
 
-use crate::MidenAir;
+use crate::session::ChipletAir;
 
 // MULTI-AIR ACE CIRCUIT
 // ================================================================================================
 
-/// Build the combined ACE circuit for the VM's multi-AIR proof.
+/// Build the combined ACE circuit for the precompile chiplet multi-AIR proof.
 ///
 /// The output circuit evaluates
 ///   `combined = 0`
 /// where `combined = Σ_i MultiAirBeta(i) · acc_i - q·v` is the β-folded sum of the per-AIR
-/// alpha-folded constraint roots minus the shared quotient binding. The cross-AIR LogUp
-/// boundary identity is checked separately, outside the circuit.
+/// alpha-folded constraint roots minus the shared quotient binding. The cross-chiplet LogUp
+/// boundary identity is checked separately by `ChipletMultiAir::eval_external`.
 ///
-/// Implementation strategy:
-/// 1. Build each AIR's sub-DAG with its own (single-AIR) layout via [`build_ace_dag_for_air`].
-///    These DAGs encode each AIR's alpha-folded constraints referencing layout-relative
-///    `InputKey::Main`/`AuxCoord`/`AuxBusBoundary` slots.
-/// 2. Re-emit each sub-DAG's nodes into a fresh `DagBuilder` configured for the *combined* layout,
-///    shifting its main/aux/bus-boundary slot indices into that AIR's subregion (the first AIR
-///    passes through unchanged) and tagging its selectors with the AIR's instance index.
-/// 3. β-fold: `combined = Σ_i MultiAirBeta(i) · acc_i - q·v`, where the verifier sets one
-///    coefficient to β and the others to 1 based on proof_order.
+/// Implementation strategy mirrors `miden_air::ace::build_multi_air_ace_circuit`:
+/// 1. Build each chiplet AIR's sub-DAG with its own single-AIR layout via
+///    [`build_ace_dag_for_air`]. These DAGs encode each AIR's alpha-folded constraints referencing
+///    layout-relative `InputKey::Preprocessed`/`Main`/`AuxCoord`/`AuxBusBoundary` slots.
+/// 2. Re-emit each sub-DAG's nodes into a fresh [`DagBuilder`] configured for the combined layout,
+///    shifting preprocessed/main/aux/bus-boundary slot indices into that AIR's subregion and
+///    tagging row selectors with the AIR's `ChipletAir::all()` instance index.
+/// 3. β-fold all AIR accumulators and subtract the single shared `q·v` quotient binding.
 ///
-/// Returns the combined `AceCircuit` ready for emission to the MASM ACE chip.
-pub fn build_multi_air_ace_circuit<EF>(config: AceConfig) -> Result<AceCircuit<EF>, AceError>
-where
-    EF: ExtensionField<Felt>,
-    SymbolicExpressionExt<Felt, EF>: Algebra<EF>,
-{
+/// The caller order is exactly [`ChipletAir::all()`]. We intentionally do not sort by height or
+/// proof order here; verifier-side `MultiAirBeta(i)` assignment is expected to handle proof-order
+/// binding outside this circuit.
+pub fn build_precompile_multi_air_ace_circuit(
+    config: AceConfig,
+) -> Result<AceCircuit<QuadFelt>, AceError> {
     use miden_ace_codegen::{InputCounts, InputLayout};
 
-    // The AIRs combined by the VM proof, in canonical (commit-order-independent) order.
-    let airs = [MidenAir::CORE, MidenAir::CHIPLETS];
+    let airs = ChipletAir::all();
     assert_eq!(
         config.num_airs,
         airs.len(),
-        "build_multi_air_ace_circuit builds the {}-AIR VM circuit; AceConfig::num_airs must match",
+        "build_precompile_multi_air_ace_circuit builds the {}-AIR precompile circuit; \
+         AceConfig::num_airs must match",
         airs.len(),
     );
 
     // LMCS commits each per-AIR matrix as a stack and aligns each matrix's column count to the
-    // LMCS rate (8 for Poseidon2). The wire OOD opens carry data in *aligned* per-AIR widths
-    // concatenated across AIRs, so the combined layout uses those aligned widths (trailing slots
-    // are unreferenced padding) to line up with the wire format byte-for-byte. This mirrors what
-    // `verify_aligned` does internally before truncation.
+    // LMCS rate (8 for Poseidon2). The wire OOD opens carry data in aligned per-AIR widths
+    // concatenated across AIRs, so the combined layout uses those aligned widths. Padding slots
+    // within each AIR's subregion are unreferenced by the constraints.
     const LMCS_ALIGNMENT: usize = 8;
 
-    // Per-AIR sub-DAG plus the LMCS-aligned widths and boundary/periodic counts the combined
-    // layout needs.
     struct AirParts<EF> {
         dag: AceDag<EF>,
+        aligned_preprocessed: usize,
         aligned_main: usize,
         aligned_aux_coord: usize,
         aux_n: usize,
         num_periodic: usize,
     }
 
-    // Each sub-DAG is built with its own single-AIR layout so the symbolic
-    // eval references plain `InputKey` variants.
     let sub_config = AceConfig { num_airs: 1, ..config };
-    let mut parts: Vec<AirParts<EF>> = Vec::with_capacity(airs.len());
+    let mut parts: Vec<AirParts<QuadFelt>> = Vec::with_capacity(airs.len());
     for air in &airs {
-        let artifacts = build_ace_dag_for_air::<MidenAir, Felt, EF>(air, sub_config)?;
-        let main_w = <MidenAir as BaseAir<Felt>>::width(air);
-        let aux_w = <MidenAir as LiftedAir<Felt, EF>>::aux_width(air);
+        let artifacts = build_ace_dag_for_air::<ChipletAir, Felt, QuadFelt>(air, sub_config)?;
+        let preprocessed_w = <ChipletAir as BaseAir<Felt>>::preprocessed_width(air);
+        let main_w = <ChipletAir as BaseAir<Felt>>::width(air);
+        let aux_w = <ChipletAir as LiftedAir<Felt, QuadFelt>>::aux_width(air);
         parts.push(AirParts {
             dag: artifacts.dag,
+            aligned_preprocessed: preprocessed_w.next_multiple_of(LMCS_ALIGNMENT),
             aligned_main: main_w.next_multiple_of(LMCS_ALIGNMENT),
             aligned_aux_coord: (aux_w * miden_ace_codegen::EXT_DEGREE)
                 .next_multiple_of(LMCS_ALIGNMENT),
-            aux_n: <MidenAir as LiftedAir<Felt, EF>>::num_aux_values(air),
+            aux_n: <ChipletAir as LiftedAir<Felt, QuadFelt>>::num_aux_values(air),
             num_periodic: artifacts.layout.counts.num_periodic,
         });
     }
 
-    // Combined input counts.
-    //
-    // - `width` and `aux_width` sum the LMCS-aligned per-AIR widths so the codegen layout matches
-    //   the wire byte order exactly. Padding slots within each AIR's subregion are unreferenced by
-    //   the constraints (each AIR's eval body only addresses columns up to its original width).
-    // - `num_public` is the AIRs' shared public-value count (the stack-i/o felts). The program hash
-    //   and deferred root are statement `aux_inputs`, not read by any AIR constraint, so they never
-    //   enter the ACE READ section.
-    // - `num_aux_boundary` sums each AIR's boundary slot count.
-    // - `num_periodic` comes from the single AIR that declares periodic columns (the others
-    //   contribute none); the combined `LiftedAir` wrapper exposes them once.
-    let num_public = <MidenAir as BaseAir<Felt>>::num_public_values(&airs[0]);
+    let num_public = <ChipletAir as BaseAir<Felt>>::num_public_values(&airs[0]);
+    for air in &airs[1..] {
+        assert_eq!(
+            <ChipletAir as BaseAir<Felt>>::num_public_values(air),
+            num_public,
+            "all precompile chiplet AIRs must share the public-value window",
+        );
+    }
+
     let combined_aux_coord_w: usize = parts.iter().map(|p| p.aligned_aux_coord).sum();
     assert!(
         combined_aux_coord_w.is_multiple_of(miden_ace_codegen::EXT_DEGREE),
-        "combined aux coord width must be even"
+        "combined aux coord width must be divisible by extension degree",
     );
     let combined_counts = InputCounts {
-        preprocessed_width: 0,
+        preprocessed_width: parts.iter().map(|p| p.aligned_preprocessed).sum(),
         width: parts.iter().map(|p| p.aligned_main).sum(),
         aux_width: combined_aux_coord_w / miden_ace_codegen::EXT_DEGREE,
         num_aux_boundary: parts.iter().map(|p| p.aux_n).sum(),
@@ -127,8 +114,8 @@ where
         num_quotient_chunks: config.num_quotient_chunks,
     };
 
-    // Every constraint references a public value within the AIRs' shared public window; fail
-    // loudly if one ever addresses a slot outside it.
+    // Every constraint references a public value within the AIRs' shared public window; fail loudly
+    // if one ever addresses a slot outside it.
     let check_public = |index: usize| -> InputKey {
         assert!(
             index < num_public,
@@ -137,8 +124,6 @@ where
         InputKey::Public(index)
     };
 
-    // Build combined layout via the multi-air constructors so the stark-vars region
-    // includes the multi-AIR β coefficients and per-AIR selector slots.
     let combined_layout = match config.layout {
         miden_ace_codegen::LayoutKind::Native => {
             InputLayout::new_multi_air(combined_counts, config.num_airs)
@@ -148,13 +133,8 @@ where
         },
     };
 
-    // Re-emit each per-AIR sub-DAG into the combined builder, shifting its main / aux /
-    // bus-boundary slot indices into that AIR's subregion of the combined layout and tagging its
-    // selectors with the AIR's instance index. The cumulative offsets are zero for the first AIR
-    // (which passes through unchanged) and grow by each AIR's aligned widths. `InputKey` indices
-    // are in column / EF units, so the aux shift uses the EF-count of the preceding aligned aux
-    // regions.
-    let mut builder = DagBuilder::<EF>::new();
+    let mut builder = DagBuilder::<QuadFelt>::new();
+    let mut preprocessed_offset = 0usize;
     let mut main_offset = 0usize;
     let mut aux_w_offset = 0usize;
     let mut boundary_offset = 0usize;
@@ -167,6 +147,10 @@ where
             &mut builder,
             &part.dag,
             |key| match key {
+                InputKey::Preprocessed { offset, index } => InputKey::Preprocessed {
+                    offset,
+                    index: index + preprocessed_offset,
+                },
                 InputKey::Main { offset, index } => {
                     InputKey::Main { offset, index: index + main_offset }
                 },
@@ -182,7 +166,7 @@ where
                 InputKey::Public(i) => check_public(i),
                 other => other,
             },
-            true, // skip each sub-DAG's `Sub(acc, q*v)` root — the combined formula shares one q*v
+            true,
         );
 
         // Each sub-DAG root is `Sub(acc, q*v)`: extract the alpha-folded `acc` and the quotient
@@ -204,6 +188,7 @@ where
         }
         accs.push(acc);
 
+        preprocessed_offset += part.aligned_preprocessed;
         main_offset += part.aligned_main;
         aux_w_offset += part.aligned_aux_coord / miden_ace_codegen::EXT_DEGREE;
         boundary_offset += part.aux_n;
@@ -211,9 +196,6 @@ where
 
     let shared_qv = shared_qv.expect("multi-AIR circuit requires at least one AIR");
 
-    // β-fold: `combined = Σ_i MultiAirBeta(i) · acc_i - q*v`. The verifier assigns β to the AIR at
-    // proof_order position 0 and 1 to the others. Emit all β inputs, then all per-AIR terms, then
-    // the running sum, matching the layout/MASM ordering.
     let mabs: Vec<NodeId> =
         (0..accs.len()).map(|i| builder.input(InputKey::MultiAirBeta(i))).collect();
     let mut combined_acc: Option<NodeId> = None;
@@ -225,9 +207,8 @@ where
         });
     }
     let combined_acc = combined_acc.expect("multi-AIR circuit requires at least one AIR");
-    // SAFETY-CRITICAL invariant: this `sub` must be the *last* operation emitted into the
-    // builder, since the MASM ACE chip's "is the last op zero?" check evaluates that node
-    // as the root.
+    // SAFETY-CRITICAL invariant: this `sub` must be the last operation emitted into the builder,
+    // since the MASM ACE chip's "is the last op zero?" check evaluates that node as the root.
     let combined_constraint = builder.sub(combined_acc, shared_qv);
 
     let combined_dag = builder.build(combined_constraint);
@@ -236,14 +217,9 @@ where
 
 /// Re-emit `source` into `builder`, rewriting each `Input(key)` via `rewrite`.
 ///
-/// Returns a translation table mapping the source DAG's node indices to the
-/// corresponding `NodeId`s in `builder`. The source DAG's nodes must be in
-/// topological order (which they are by `DagBuilder::intern` construction).
-///
-/// `skip_root` skips the source DAG's root node (the last node) when re-emitting.
-/// Useful when the caller intends to bypass the source's top-level expression and
-/// wire up children directly (e.g., extracting `acc` from a `Sub(acc, q*v)` root
-/// when the `q*v` subtraction is replaced by a shared one in the combined DAG).
+/// Returns a translation table mapping source DAG node indices to corresponding nodes in `builder`.
+/// `skip_root` skips the source DAG's root node, allowing callers to extract and rewire the
+/// children of the per-AIR `Sub(acc, q*v)` root.
 fn reemit_dag_with_rewrite<EF, F>(
     builder: &mut DagBuilder<EF>,
     source: &AceDag<EF>,
@@ -273,4 +249,27 @@ where
         translation.push(new_id);
     }
     translation
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_ace_codegen::{AceConfig, LayoutKind};
+
+    use super::build_precompile_multi_air_ace_circuit;
+    use crate::session::NUM_CHIPLETS;
+
+    #[test]
+    fn precompile_multi_air_ace_circuit_builds() {
+        let config = AceConfig {
+            num_quotient_chunks: 8,
+            layout: LayoutKind::Masm,
+            num_airs: NUM_CHIPLETS,
+        };
+
+        let circuit = build_precompile_multi_air_ace_circuit(config)
+            .expect("precompile multi-AIR ACE circuit");
+        assert_eq!(circuit.layout().counts.num_public, crate::logup::NUM_PUBLIC_VALUES);
+        assert_eq!(circuit.layout().counts.num_aux_boundary, NUM_CHIPLETS);
+        assert!(circuit.layout().counts.preprocessed_width >= 8);
+    }
 }

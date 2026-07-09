@@ -9,6 +9,8 @@ use alloc::string::{String, ToString};
 use miden_core::deferred::{DeferredState, TRUE_DIGEST};
 pub use miden_core::proof::{DeferredProof, HashFunction, StarkProof};
 
+#[cfg(any(test, feature = "std"))]
+pub mod ace;
 pub mod ec;
 pub mod hash;
 pub mod logup;

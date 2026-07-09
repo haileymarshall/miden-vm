@@ -119,8 +119,8 @@ where
                 },
                 BaseEntry::Public => builder.input(InputKey::Public(v.index)),
                 BaseEntry::Periodic => periodic_nodes[v.index],
-                BaseEntry::Preprocessed { .. } => {
-                    panic!("preprocessed trace entries are not supported")
+                BaseEntry::Preprocessed { offset } => {
+                    builder.input(InputKey::Preprocessed { offset, index: v.index })
                 },
             },
             BaseLeaf::IsFirstRow => builder.input(InputKey::IsFirst),
