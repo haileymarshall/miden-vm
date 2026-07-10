@@ -101,6 +101,7 @@ jobs:
       fail-fast: false
       matrix:
         target:
+          - smt
           - word
           - merkle
           - merkle_store
