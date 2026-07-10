@@ -44,8 +44,8 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 
 /// Inputs required to build an execution trace from pre-executed data.
 ///
-/// Its binary form is trusted replay data. Sparse MAST hashes inside the trace generation context
-/// are not validated against untrusted senders; see
+/// Its binary form is trusted replay data. Sparse MAST node and digest maps inside the trace
+/// generation context are not checked against a source `MastForest` commitment; see
 /// <https://github.com/0xMiden/miden-vm/issues/3303>.
 #[derive(Debug)]
 pub struct TraceBuildInputs {
