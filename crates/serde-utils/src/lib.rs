@@ -445,7 +445,7 @@ pub trait Deserializable: Sized {
     /// Note: if `bytes` contains more data than needed to deserialize `self`, no error is
     /// returned.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        Self::read_from(&mut SliceReader::new(bytes))
+        Self::read_from(&mut BudgetedReader::new(SliceReader::new(bytes), bytes.len()))
     }
 
     /// Deserializes `Self` from bytes with a byte budget limit.
