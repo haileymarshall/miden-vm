@@ -207,10 +207,7 @@ impl Hash for Felt {
 // ================================================================================================
 
 impl Field for Felt {
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")))]
-    type Packing = PackedFelt;
-
-    #[cfg(all(target_arch = "x86_64", target_feature = "avx512f"))]
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
     type Packing = PackedFelt;
 
     #[cfg(all(target_arch = "aarch64", target_feature = "neon"))]
@@ -220,8 +217,7 @@ impl Field for Felt {
     type Packing = PackedFelt;
 
     #[cfg(not(any(
-        all(target_arch = "x86_64", target_feature = "avx2", not(target_feature = "avx512f")),
-        all(target_arch = "x86_64", target_feature = "avx512f"),
+        all(target_arch = "x86_64", target_feature = "avx2"),
         target_arch = "aarch64",
         all(target_arch = "wasm32", target_feature = "simd128"),
     )))]

@@ -394,7 +394,7 @@ impl<'a> ReadAdapter<'a> {
     /// Returns true if there is sufficient capacity remaining in `buf` to hold `n` bytes
     #[inline]
     fn has_remaining_capacity(&self, n: usize) -> bool {
-        let remaining = self.buf.capacity() - self.buffer().len();
+        let remaining = self.buf.capacity() - self.buf.len();
         remaining >= n
     }
 
@@ -951,6 +951,21 @@ mod tests {
     }
 
     #[test]
+    fn read_adapter_repeated_slices_compact_consumed_buffer() {
+        let data = (0..4096).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let mut chunked = ChunkedReader::new(data.clone(), 32);
+        let mut adapter = ReadAdapter::new(&mut chunked);
+
+        for i in 0..64 {
+            let start = i * 32;
+            let end = start + 32;
+            assert_eq!(adapter.read_slice(32).unwrap(), &data[start..end]);
+            assert!(adapter.buf.len() <= 32);
+            assert!(adapter.pos <= 32);
+        }
+    }
+
+    #[test]
     fn read_adapter_roundtrip() {
         const VALUE: usize = 2048;
 
@@ -1034,13 +1049,11 @@ mod tests {
         assert_eq!(reader.buf.len(), 496);
         assert_eq!(reader.pos, 496);
         // The byte string is 13 bytes, followed by 4 bytes containing the trailing u32 value.
-        // We expect that the underlying reader will buffer the remaining bytes of the file when
-        // reading STR_BYTES, so the total size of our adapter's buffer should be
-        // 496 + STR_BYTES.len() + size_of::<u32>();
+        // The consumed prefix should be compacted away before buffering these remaining bytes.
         assert_eq!(reader.read_slice(STR_BYTES.len()).unwrap(), STR_BYTES);
-        assert_eq!(reader.buf.len(), 496 + STR_BYTES.len() + size_of::<u32>());
+        assert_eq!(reader.buf.len(), STR_BYTES.len() + size_of::<u32>());
         // We haven't read the u32 yet
-        assert_eq!(reader.pos, 509);
+        assert_eq!(reader.pos, STR_BYTES.len());
         assert_eq!(reader.read_u32().unwrap(), 0xbeef);
         // Now we have
         assert_eq!(reader.buf.len(), 0);
