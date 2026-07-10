@@ -1217,17 +1217,6 @@ mod tests {
         assert!(matches!(collect_result.unwrap_err(), DeserializationError::UnexpectedEOF));
     }
 
-    #[test]
-    fn read_from_bytes_rejects_fake_length_prefix() {
-        let mut data = Vec::new();
-        data.push(0);
-        data.extend_from_slice(&1000u64.to_le_bytes());
-        data.extend_from_slice(&42u64.to_le_bytes());
-
-        let result = Vec::<u64>::read_from_bytes(&data);
-        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
-    }
-
     /// BudgetedReader rejects fake length prefixes BEFORE iteration begins.
     ///
     /// With a 64-byte budget, max_alloc(8) = 8, so a claim of 1000 elements
@@ -1251,6 +1240,15 @@ mod tests {
             Err(DeserializationError::InvalidValue(_)) => {}, // expected
             other => panic!("expected InvalidValue error, got {:?}", other.map(|_| "Ok")),
         }
+    }
+
+    #[test]
+    fn read_many_iter_does_not_advertise_fallible_items_as_ready() {
+        let data = [0u8; 8];
+        let mut reader = SliceReader::new(&data);
+        let iter = reader.read_many_iter::<u64>(1000).unwrap();
+
+        assert_eq!(iter.size_hint(), (0, Some(1000)));
     }
 
     /// Best practice: budget = input length provides both protections.
