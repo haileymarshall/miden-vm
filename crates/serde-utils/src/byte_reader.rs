@@ -922,7 +922,7 @@ mod tests {
     fn read_adapter_large_array_from_chunked_reader() {
         let data = (0..897).map(|i| (i % 251) as u8).collect::<Vec<_>>();
         let expected: [u8; 897] = data.clone().try_into().unwrap();
-        let mut chunked = ChunkedReader::new(data.clone(), 128);
+        let mut chunked = ChunkedReader::new(data, 128);
         let mut adapter = ReadAdapter::new(&mut chunked);
 
         assert_eq!(adapter.read_array::<897>().unwrap(), expected);
