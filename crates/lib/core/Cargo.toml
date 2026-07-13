@@ -55,8 +55,8 @@ miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
-num = { version = "0.4" }
-rand = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
+num = { workspace = true }
+rand = { workspace = true, features = ["std", "std_rng", "thread_rng"] }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
 
