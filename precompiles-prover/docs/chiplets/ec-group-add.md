@@ -11,7 +11,7 @@ every exceptional case. Companion to the uint relation chiplets, whose
 arrangements carry **all** the field math *and all the predicates* —
 no coordinate limb enters this trace; this chiplet's own job is
 *proving which case applies* and tying the right certificate set to the
-result. As built: **17 main columns, 3 aux (LogUp only), 4 periodic
+result. As built: **22 main columns, 12 aux (LogUp only), 4 periodic
 one-hots, 4 rows per op.**
 
 ## The case lattice
@@ -31,8 +31,8 @@ cases exhaustive):
 The flags are a prover-witnessed **near-one-hot**
 (`Σ caseᵢ = act + pai_p·pai_q` — see below for the one legal overlap),
 and each case's gated certificate demands make every wrong claim
-unprovable: claiming `generic` on equal x's demands the disequality
-witness `inv·d ≡ b`, unrecordable at `d = 0`; claiming
+unprovable: claiming `generic` on equal x's demands `d`'s own `UintAdd`
+tuple certify `d ≠ 0`, unrecordable at `d = 0`; claiming
 `double`/`cancel` on distinct x's demands the `x₁ + 0 ≡ x₂` equality
 certificate, unrecordable for unequal values; claiming a `pai` case
 against a finite operand fails the `is_pai` cell that arrives *through
@@ -50,9 +50,9 @@ taken twice (the require layer asserts both operands resolve to it).
 Exclusion is real only where cases would *disagree*: `double` (tangent
 result) vs `cancel` (`∞`) — and there it is structural, not policed:
 their conditions overlap only at `2y₁ ≡ 0 ∧ y₁ ≠ 0`, impossible for odd
-`p`. At `y = 0`, `double`'s nonzero witness is unsatisfiable and only
-`cancel` can be claimed; and on-curve `x₁ = x₂ ∧ y₂ ∉ {±y₁}` cannot
-occur.
+`p`. At `y = 0`, `double`'s slope pin is unsatisfiable on a smooth curve
+(see below) and only `cancel` can be claimed; and on-curve
+`x₁ = x₂ ∧ y₂ ∉ {±y₁}` cannot occur.
 
 ## Case predicates: equality, disequality, zero — all certificates
 
@@ -67,18 +67,14 @@ registers.
   coordinate ptrs, and the uint store interns by value, so a ptr-level
   equality of those columns *is* value equality. No UintAdd block, no
   limbs — the tie costs nothing on the uint relations.
-- **Disequality / nonzero** (`generic`'s `x₁ ≠ x₂`, `double`'s
-  `y₁ ≠ 0`): the **allocated-inverse MAC** (the `is_c_zero` idiom
-  inverted) — store `inv = b·d⁻¹` (resp. `b·y₁⁻¹`) as a transient and
-  demand `inv·d + 0 ≡ b` (resp. `inv·y₁ + 0 ≡ b`). The right-hand side
-  needs only *some* stored value known nonzero — and the group's `b`
-  is exactly that, already stored and already guarded `≠ 0` by
-  `EcCreate` (the PAI-encoding guard doing double duty):
-  `inv·d ≡ b ≠ 0 ⟹ d ≠ 0`. **No `one` pin anywhere.** Deterministic
-  completeness — no SZ gap, no β-dependent aux witness; a forged claim
-  dies in the **mul chiplet** (at `d = 0` the MAC reads `0 ≡ b ≠ 0`,
-  satisfiable by no stored `inv`). Costs one MAC block + one transient
-  per generic/double op.
+- **Disequality** (`generic`'s `x₁ ≠ x₂`): rides the `nz` field the
+  `UintAdd` chiplet already carries on `d`'s own arrangement tuple
+  `x₁ + d ≡ x₂` — no separate inverse witness, no extra MAC block (see
+  `uint::add`'s "Nonzero certificate"). Costs nothing beyond the `d`-sub
+  the generic case lays anyway.
+- **`double`'s `y₁ ≠ 0`**: needs no witness at all. The slope pin
+  `2·λ·y ≡ s = 3x² + a` is itself unsatisfiable at `y = 0` on a smooth
+  curve — see [below](#y--0-2-torsion-and-why-it-routes-to-cancel).
 
 The earlier design shipped the **β-fingerprint** alternative (an aux
 register accumulating the limb difference of the consumed coordinate
@@ -142,8 +138,10 @@ s ≡ 3·(x·x) + 1·a         (κₐ = 3: numerator in one MAC)
 Two MACs, **zero `UintAdd` blocks** — without κ this is three extra add
 blocks (`x²+x²+x²`, `y+y`) per double, and doubles dominate ladders.
 The shared `r_ptr` makes the numerator/denominator equality free, and
-`y ≠ 0` (the case predicate) is exactly the invertibility of `2y`
-(p odd), so `λ` is uniquely determined and canonically stored.
+`y ≠ 0` (guaranteed by curve smoothness at this very slope pin — see
+[above](#y--0-2-torsion-and-why-it-routes-to-cancel)) is exactly the
+invertibility of `2y` (p odd), so `λ` is uniquely determined and
+canonically stored.
 
 **Generic** (`λ = (y₂ − y₁)/(x₂ − x₁)`):
 
@@ -154,26 +152,35 @@ d = x₂ − x₁               (sub arrangement)
 
 with `d ≠ 0` from the case predicate making `λ` unique.
 
-**Shared tail** (both live cases): `x₃ = λ² − x₁ − x₂`,
-`y₃ = λ(x₁ − x₃) − y₁`:
+**Shared tail** (both live cases): `x₃ = λ² − t`, `e = x₁ − x₃`,
+`y₃ = λ·e − y₁`, where `t = x₁ + x₂`:
 
 ```
-w ≡ 1·(λ·λ) + 0           t = x₁ + x₂ (add; 2x via the same block when doubling)
-x₃ + t = w                (sub arrangement)
-e = x₁ − x₃               (sub)
-u ≡ 1·(λ·e) + 0           y₃ + y₁ = u (sub arrangement)
+t = x₁ + x₂                       generic only (add); double folds t = 2x₁
+                                   straight into the next line's κ_c instead
+x₃ ≡ 1·(λ·λ) − κ_c·c              fused mul-subtract: (κ_c, c) = (1, t) generic,
+                                   (2, x₁) double
+e = x₁ − x₃                        (sub)
+y₃ ≡ 1·(λ·e) − 1·y₁               fused mul-subtract
 ```
 
-Per-op tally (certificates included): `generic` ≈ 4 MACs + 5 adds
-(slope pair + tail + the `inv·d ≡ b` witness); `double` ≈ 5 MACs +
-6 adds (tangent pair + tail + `inv·y₁ ≡ b` + the two equality
-certificates) — plus λ/x₃/y₃/`inv`/transients in the uint store, and
-only 4 rows in this chiplet; `cancel` is 2 adds (x-equality +
-`is_c_zero`); `pai_*` are free — pass-throughs are **tuple
-arrangements** (`r_ptr = q_ptr`, no new store row, no field work) and
-`cancel` resolves to the group's canonical PAI row (allocated once per
-group at `EcCreate`), so every group op has a well-defined result
-ptr.
+The two mul-subtracts are a single `UintMul` op each (the chiplet's
+`is_sub` flag flips the `c` term's sign), so no `w = λ²` / `u = λ·e`
+intermediate is ever stored or separately subtracted — the earlier
+layout's four tail ops (`w`, `x₃+t=w`, `u`, `y₃+y₁=u`) collapse to two.
+
+Per-op tally (certificates included): `generic` ≈ 3 MACs + 3 adds
+(chord + tail's two fused mul-subtracts, plus the `t`-add and `e`-sub;
+the `d ≠ 0` disequality rides `d`'s own `UintAdd` tuple for free);
+`double` ≈ 4 MACs + 1 add (tangent pair + tail's two fused
+mul-subtracts, plus the `e`-sub; the `x₁ = x₂` / `y₁ = y₂` equalities
+are native in-cell constraints, free) — plus λ/t/e/x₃/y₃ transients in
+the uint store, and only 4 rows in this chiplet; `cancel` is 1 add
+(`is_c_zero`; the `x₁ = x₂` equality is native, free); `pai_*` are free
+— pass-throughs are **tuple arrangements** (`r_ptr = q_ptr`, no new
+store row, no field work) and `cancel` resolves to the group's
+canonical PAI row (allocated once per group at `EcCreate`), so every
+group op has a well-defined result ptr.
 
 ## Result membership: the closure certificate (implemented)
 
@@ -241,10 +248,15 @@ as cycle-constant columns), read through the two-row windows:
 
 | row | cells 0–3 | emits |
 |---|---|---|
-| 0 `slope` | `(slope_aux, λ, inv, t)` | the slope + predicate certificates (cells local) and the early tail (`w`/`e`/`u`/`x₃` via next) |
-| 1 `tail` | `(w, e, u, x₃)` | `y₃`'s sub + the live result consume (`y₃`/`r`/`group` via next) |
-| 2 `res` | `(y₃, r, sbound, group)` | the `EcGroupAdd` provide, the cert provide, the operand / cancel-PAI / group consumes (`p`/`q`/mult via next) |
+| 0 `slope` | `(slope_aux, λ, —, t)` | the slope + predicate certificates (cells local) and the early tail (`e`/`x₃`/`y₃` via next) |
+| 1 `tail` | `(y₃, e, —, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` via next) |
+| 2 `res` | `(—, r, sbound, group)` | the `EcGroupAdd` provide, the cert provide, the operand / cancel-PAI / group consumes (`p`/`q`/mult via next) |
 | 3 `term` | `(mult, p, q, —)` | — hosts only; the constancy gate drops at the block boundary |
+
+Cell 2 is unused on the slope and tail rows (the disequality witness
+and the `w`/`u` tail intermediate it once held are both gone); cell 0
+is unused on the res row (`y₃` moved to the tail row so the fused
+`λ·e − y₁` mul-subtract reads it in the slope-row window).
 
 - **Columns** (cycle-constant over the block): the four operand
   coordinate ptrs (0 for a PAI operand), `a/b/bound`, the five case
@@ -252,10 +264,12 @@ as cycle-constant columns), read through the two-row windows:
   (`r − p − 1`, `r − q − 1`) — what gates or names certificates across
   rows 0–2. The pass-through ties fire on the res row
   (`pai_p·(r − q) = 0` with `r` local and `q` in the term row's cells).
-- **Aux** (width 4): σ + three fraction columns, shape `[7, 7, 7, 5]` —
-  cols 0–2 the bindings / slope / tail, col 3 the **mint column** (4
-  `Range16` ordering consumes + the `EcOnCurveCert` provide, all gated
-  `at_res · mints`). Pure LogUp, no witness registers.
+- **Aux** (width 12): σ + eleven fraction columns, shape
+  `[1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 1]` (21 fractions, all closing at
+  `log_quotient_degree = 1`) — cols 0–3 the bindings, 4–5 the slope,
+  6–8 the tail, 9–11 the **mint columns** (4 `Range16` ordering
+  consumes + the `EcOnCurveCert` provide, all gated `at_res · mints`).
+  Pure LogUp, no witness registers.
 - **Periodic**: the four row one-hots.
 
 ## Buses
@@ -265,9 +279,9 @@ as cycle-constant columns), read through the two-row windows:
 | `EcGroupAdd` (16) | `(group_ptr, p_ptr, q_ptr, r_ptr)` | provide on res rows, mult = consumer count. **Interns by relation identity `(group, p, q)`** — a repeat add collapses onto one block, mults accumulating (an MSM table combine reused across windows costs one block, one set of certificates); the dedup-check skips re-deriving the op and its certificates. Mult 0 in the dormant EC-stack tests — driven by ladder / DAG / MSM consumers |
 | `EcOnCurveCert` (17) | `(group_ptr, r_ptr)` | provide ×1 on the res row of a **mint** op (`mints = 1`); consumed by `r`'s point-store row in place of the MAC trio (the closure cert). Independent of the `EcGroupAdd` consumer count |
 | `EcPoint` (15) | — | consume ×2 per op (operand bindings, the case flags as `is_pai`) + ×1 for the result (live cases: against the computed `x₃`/`y₃`; `cancel`: against the group's PAI row) |
-| `EcGroup` (14) | — | consume ×1 on live cases (resolves `a` for the tangent; `b` anchors the inverse witnesses; `scalar_bound` carried to close the 5-tuple) |
-| `UintAdd` (11) | — | per case: `d`-sub + tail subs (`generic`/`double`), the `is_b_zero` equality certificates (`x₁ + 0 ≡ x₂` for `double`/`cancel`, `y₁ + 0 ≡ y₂` for `double`), `cancel`'s `is_c_zero` tuple |
-| `UintMul` (12) | — | the chord / tangent MACs, `w = λ²`, `u = λ·e`, and the inverse-witness MACs `inv·d ≡ b` / `inv·y₁ ≡ b` — all exact-κ tuples |
+| `EcGroup` (14) | — | consume ×1 on live cases (resolves `a` for the tangent; `b` anchors the group's curve context; `scalar_bound` carried to close the 5-tuple) |
+| `UintAdd` (11) | — | per case: `d`-sub (`nz = 1` on generic — the disequality certificate), `t`-add (generic), `e`-sub (both live cases), `cancel`'s `is_c_zero` tuple. The `x₁ = x₂` / `y₁ = y₂` equalities are native in-cell constraints, not `UintAdd` traffic |
+| `UintMul` (12) | — | the chord / tangent MACs, and the shared tail's two fused mul-subtracts (`x₃ = λ² − t`, `y₃ = λ·e − y₁`, the `UintMul` `is_sub` flag set) — no `w`/`u` intermediate, no inverse-witness MAC |
 
 No `UintVal` traffic: the chiplet consumes no views.
 
