@@ -11,7 +11,7 @@ every exceptional case. Companion to the uint relation chiplets, whose
 arrangements carry **all** the field math *and all the predicates* —
 no coordinate limb enters this trace; this chiplet's own job is
 *proving which case applies* and tying the right certificate set to the
-result. As built: **22 main columns, 12 aux (LogUp only), 4 periodic
+result. As built: **21 main columns, 12 aux (LogUp only), 4 periodic
 one-hots, 4 rows per op.**
 
 ## The case lattice
@@ -241,22 +241,26 @@ ladder consumer count) independent of the always-present cert.
 
 ## Layout (as implemented)
 
-Period-**4** blocks, 22 main columns; one add op per block, all-zero
-`act = 0` blocks as padding. The 4 ptr cells per row hold transients
+Period-**4** blocks, 21 main columns; one add op per block, all-zero
+`act = 0` blocks as padding. The 3 ptr cells per row hold transients
 *and* the hosted per-block scalars (what the old 16-row layout carried
-as cycle-constant columns), read through the two-row windows:
+as cycle-constant columns), read through the two-row windows — each
+row's 3 live values fill the row exactly, no dead cell:
 
-| row | cells 0–3 | emits |
+| row | cells 0–2 | emits |
 |---|---|---|
-| 0 `slope` | `(slope_aux, λ, —, t)` | the slope + predicate certificates (cells local) and the early tail (`e`/`x₃`/`y₃` via next) |
-| 1 `tail` | `(y₃, e, —, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` via next) |
-| 2 `res` | `(—, r, sbound, group)` | the `EcGroupAdd` provide, the cert provide, the operand / cancel-PAI / group consumes (`p`/`q`/mult via next) |
-| 3 `term` | `(mult, p, q, —)` | — hosts only; the constancy gate drops at the block boundary |
+| 0 `slope` | `(slope_aux, λ, t)` | the slope + predicate certificates (cells local) and the early tail (`e`/`x₃`/`y₃` via next) |
+| 1 `tail` | `(y₃, e, x₃)` | the two fused mul-subtracts + the live result consume (`r`/`group` via next) |
+| 2 `res` | `(r, sbound, group)` | the `EcGroupAdd` provide, the cert provide, the operand / cancel-PAI / group consumes (`p`/`q`/mult via next) |
+| 3 `term` | `(mult, p, q)` | — hosts only; the constancy gate drops at the block boundary |
 
-Cell 2 is unused on the slope and tail rows (the disequality witness
-and the `w`/`u` tail intermediate it once held are both gone); cell 0
-is unused on the res row (`y₃` moved to the tail row so the fused
-`λ·e − y₁` mul-subtract reads it in the slope-row window).
+`t` (slope row, cell 2) is the only cell that goes unused, and only on
+`double` ops — it folds into the tail's `x₃` mul-subtract as a `κ_c = 2`
+scale instead of being materialized. Every other cell on every row is
+live: after the disequality witness and the `w`/`u` tail intermediate
+were dropped, the slope/tail/res rows' three remaining values pack
+exactly into 3 cells, so the fourth column disappears from the trace
+entirely (`NUM_CELLS: 4 → 3`).
 
 - **Columns** (cycle-constant over the block): the four operand
   coordinate ptrs (0 for a PAI operand), `a/b/bound`, the five case
